@@ -1,11 +1,11 @@
 name: quote-selection
 label: Quote in reply
-version: 0.1.0
+version: 0.2.0
 manifest_version: 2
 api_version: 1
-description: "Highlight a passage in a Hermes Desktop chat and add it to your reply as a Markdown quote, with an optional comment. Desktop-only: no agent tools, hooks or env vars."
+description: "Select text in a Hermes Desktop chat to keep it as an annotation in a pill above the reply box, with an optional comment. Collect several; they are sent with your next message as Markdown quotes. Desktop-only: no agent tools, hooks or env vars."
 author: 00cyre
 license: MIT
 homepage: https://github.com/00cyre/hermes-quote-selection
-tags: [desktop, selection, quote, reply, composer]
+tags: [desktop, selection, quote, annotation, reply, composer]
 requires_hermes: ">=0.23.2"

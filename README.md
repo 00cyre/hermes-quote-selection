@@ -1,30 +1,34 @@
 # Quote in reply — a Hermes Desktop plugin
 
-Highlight a passage in a Hermes Desktop chat and add it to your reply as a quote, the way ChatGPT and Claude do.
+Select text in a Hermes Desktop chat and keep it as an annotation above the reply box. Collect as many as you like, then send them with your next message.
 
-![The popup above a highlighted sentence, rendered on a mock transcript](docs/demo.png)
+![The popup above a selected sentence, and a pill with two annotations above the reply box](docs/demo.png)
 
-*Rendered by `tests/demo.cjs` on a mock transcript, not a capture of the Hermes app.*
+*Rendered by `tests/demo.cjs` on a mock chat, not a capture of the Hermes app.*
 
 ## What it does
 
 1. Select text in any message, yours or the agent's.
-2. A small popup appears next to the selection with an optional comment box.
-3. Click **Quote in reply**, or press Enter in the comment box.
-
-The passage is appended to your draft as a Markdown blockquote, with your comment under it:
+2. A popup appears next to the selection. Type a comment if you want one, then click **Add annotation** or press Enter.
+3. A pill above the reply box counts your annotations. Repeat for other passages.
+4. Send as usual. Each passage goes out as a Markdown quote with its comment under it, followed by what you typed:
 
 ```markdown
 > the date column is in UTC, so entries after 23:00 land on the next day.
 
-can you switch it to local time?
+switch this to local time
+
+> Three rows had no owner, so I left that cell empty.
+
+Can you fix both before the next export?
 ```
 
-- Anything you already typed stays; the quote is added below it.
-- Nothing is sent. You still press Send yourself.
-- In a split view the quote goes to the chat the text was selected in.
-- If you switch chats before clicking, nothing is inserted.
-- Escape, or a click anywhere else, closes the popup.
+- Click the pill to see the list, edit a comment or remove an annotation. The × removes them all.
+- With nothing typed, Enter sends the annotations on their own.
+- Nothing is typed into the reply box, and nothing is sent until you send.
+- An annotation belongs to the chat its text came from.
+- A slash command is sent on its own. The annotations wait for your next message.
+- Annotations are kept in memory. Reloading the plugin or restarting Hermes clears them.
 
 ## Install
 
@@ -47,25 +51,37 @@ This plugin is not listed in the Hermes plugin catalog.
 ## What it touches
 
 - Reads the text you select (`window.getSelection()`) and where it is on screen.
-- Adds one popup element to the page while a selection is active.
-- Writes to the draft only through the SDK's `host.composer.insertText`.
-- No network calls, no files, no clipboard, no telemetry, nothing stored.
+- Adds a popup element to the page while a selection is active, and a pill in the reply box's `composer.top` slot.
+- Adds the annotations to your message through the SDK's composer middleware when you send.
+- Listens for Enter and clicks in a reply box that holds a pill. Only a send that follows one of those takes the annotations, so a queued or scripted send never picks them up.
+- In two cases the app sends without running middleware: the box is empty, or the agent is working. There the plugin sends through `host.composer.submit` and clears what you typed with `host.composer.setDraft`.
+- No network calls, no files, no clipboard, no telemetry.
 
 ## Known limits
 
-- **It depends on the app's transcript markup.** The plugin finds message text through Hermes Desktop's own `data-slot` and `data-session-anchor` attributes, which are not part of the plugin SDK. A Hermes update that renames them will stop the popup from appearing until the plugin is updated. `hermes plugins validate` passes with a warning for this reason.
-- The selection has to start and end inside one message.
-- The highlight clears when you click into the comment box. The popup keeps the quoted text.
-- Quotes are plain text: formatting such as bold or code fences inside the selection is not carried over.
+- **It depends on the app's transcript markup.** The plugin recognises message text by two of Hermes Desktop's own `data-slot` attributes, which are not part of the plugin SDK. If a Hermes update renames them, the popup stops appearing until the plugin is updated. `hermes plugins validate` passes with a warning for this reason.
+- In a split view, every visible reply box shows the pill of the chat in focus. Sending from another chat's box does not send them.
+- While the agent is working, Enter delivers your message and annotations straight away, and files attached to the box stay there for your next message. Cmd/Ctrl+Enter (queue) and the Send button leave the annotations in the pill.
+- Messages sent by voice don't take annotations.
+- A selection has to start and end inside one message.
+- Quotes are plain text. Formatting such as bold or code fences inside a selection is not carried over.
 
 ## Tests
 
-The tests load `desktop/plugin.js` in headless Chromium against a mock of the transcript markup and a stub SDK. They do not drive the Hermes app.
+Neither set drives the running Hermes app.
+
+`npm test` loads `desktop/plugin.js` in headless Chromium, with real React, against `tests/mock-app.js`. That file is a model of the app's reply box written from its source: which sends run middleware, and what happens while the agent is working.
 
 ```bash
 npm install
 npx playwright-core install chromium
 npm test
+```
+
+`npm run test:app` runs the plugin against Hermes Desktop's own code: the plugin SDK, the composer slot, the middleware chain and the runtime loader. It needs a Hermes source checkout with the desktop app's dependencies installed. It copies its files into a temporary folder inside that checkout and removes the folder afterwards.
+
+```bash
+HERMES_SRC=~/.hermes/hermes-agent npm run test:app
 ```
 
 ## Similar plugins

@@ -16,9 +16,11 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 const ID = 'quote-selection'
 const OWN = 'data-quote-selection'
 
-// Message text in the transcript. These two slots are the app's own markup, not
-// part of the plugin SDK: if the app renames them, the popup stops appearing.
-const BODIES = '[data-slot="aui_assistant-message-content"], [data-slot="aui_user-message-root"]'
+// The root of one chat: the primary chat and every tile has its own. This is the
+// attribute the Desktop plugin SDK guide documents for the chat surface. Nothing
+// inside a chat is looked up by the app's own element names.
+const SURFACE = '[data-chat-surface]'
+const MINE = `[${OWN}]`
 const RICH = '[contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], textarea'
 const FIELDS = `${RICH}, input, [role="textbox"]`
 
@@ -583,9 +585,16 @@ export default {
       const range = selection.getRangeAt(0)
       const start = elementOf(range.startContainer)
       const end = elementOf(range.endContainer)
-      const body = start?.closest(BODIES)
+      const surface = start?.closest(SURFACE)
 
-      if (!body || end?.closest(BODIES) !== body || start.closest(FIELDS) || end.closest(FIELDS)) {
+      // Both ends in the same chat, and no reply box, text field or part of this
+      // plugin anywhere in between.
+      if (
+        !surface ||
+        !end ||
+        !surface.contains(end) ||
+        [...surface.querySelectorAll(`${FIELDS}, ${MINE}`)].some(el => range.intersectsNode(el))
+      ) {
         return close()
       }
 
@@ -604,11 +613,11 @@ export default {
         return close()
       }
 
-      if (!picked || picked.text !== text || picked.body !== body) {
+      if (!picked || picked.text !== text || picked.start !== start) {
         note.value = ''
       }
 
-      picked = { body, chat, text }
+      picked = { chat, end, start, text }
       preview.textContent = text.replace(/\s+/g, ' ')
 
       if (!box.isConnected) {
@@ -635,13 +644,13 @@ export default {
         return
       }
 
-      const { body, chat, text } = picked
+      const { chat, end, start, text } = picked
       const comment = note.value
 
       close()
 
-      // The message is gone: its chat was closed or replaced since the selection was made.
-      if (!body.isConnected) {
+      // The text is gone: its chat was closed or replaced since the selection was made.
+      if (!start.isConnected || !end.isConnected) {
         return
       }
 

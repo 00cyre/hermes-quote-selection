@@ -4,7 +4,7 @@ const path = require('node:path')
 const { start } = require('./harness.cjs')
 
 const HTML = `
-  <article data-slot="aui_assistant-message-content">
+  <article>
     <p>The export finished. One thing to check: <span id="one">the date column is in UTC, so entries after 23:00 land on the next day.</span></p>
     <p>All 42 rows were written to the sheet. <span id="two">Three rows had no owner, so I left that cell empty.</span></p>
     <p><span id="three">The summary tab still uses last month's totals.</span></p>

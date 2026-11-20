@@ -8,7 +8,7 @@ Select text in a Hermes Desktop chat and keep it as an annotation above the repl
 
 ## What it does
 
-1. Select text in any message, yours or the agent's.
+1. Select text in a chat: any message, yours or the agent's.
 2. A popup appears next to the selection. Type a comment if you want one, then click **Add annotation** or press Enter.
 3. A pill above the reply box counts your annotations. Repeat for other passages.
 4. Send as usual. Each passage goes out as a Markdown quote with its comment under it, followed by what you typed:
@@ -46,24 +46,25 @@ Then switch it on under **Capabilities → Plugins**. The desktop half of a plug
 
 **By hand:** copy `desktop/plugin.js` to `~/.hermes/desktop-plugins/quote-selection/plugin.js`. It loads within a few seconds. If it doesn't, run **Reload desktop plugins** from ⌘K.
 
-This plugin is not listed in the Hermes plugin catalog.
-
 ## What it touches
 
 - Reads the text you select (`window.getSelection()`) and where it is on screen.
+- Checks that the selection is inside one chat, using `data-chat-surface`, the attribute the Desktop plugin SDK guide documents for a chat's root. It reads the attribute only. It does not restyle, hide or rewrite anything in the app.
+- Ignores a selection that touches a text field (`contenteditable`, `textarea`, `input`, `role="textbox"`) or the plugin's own pill.
 - Adds a popup element to the page while a selection is active, and a pill in the reply box's `composer.top` slot.
 - Adds the annotations to your message through the SDK's composer middleware when you send.
 - Listens for Enter and clicks in a reply box that holds a pill. Only a send that follows one of those takes the annotations, so a queued or scripted send never picks them up.
-- In two cases the app sends without running middleware: the box is empty, or the agent is working. There the plugin sends through `host.composer.submit` and clears what you typed with `host.composer.setDraft`.
-- No network calls, no files, no clipboard, no telemetry.
+- In two cases the app sends without running middleware: the box is empty, or the agent is working. There the plugin sends through `host.composer.submit` and clears what you typed with `host.composer.setDraft`. While the agent is working it handles that Enter itself, so the app's own handler does not also send the message. If a completion list (`role="listbox"`) is open, Enter is left to the app.
+- Annotations are kept in memory only. No network calls, no files, no clipboard, no stored settings, no telemetry.
 
 ## Known limits
 
-- **It depends on the app's transcript markup.** The plugin recognises message text by two of Hermes Desktop's own `data-slot` attributes, which are not part of the plugin SDK. If a Hermes update renames them, the popup stops appearing until the plugin is updated. `hermes plugins validate` passes with a warning for this reason.
+- The popup appears for any text in a chat that is not in a text field, so it also appears for the chat's title and for text inside tool output.
+- Outside a chat (Settings, Capabilities, the sidebar) there is no popup.
 - In a split view, every visible reply box shows the pill of the chat in focus. Sending from another chat's box does not send them.
 - While the agent is working, Enter delivers your message and annotations straight away, and files attached to the box stay there for your next message. Cmd/Ctrl+Enter (queue) and the Send button leave the annotations in the pill.
 - Messages sent by voice don't take annotations.
-- A selection has to start and end inside one message.
+- A selection has to start and end inside one chat. It can span several messages.
 - Quotes are plain text. Formatting such as bold or code fences inside a selection is not carried over.
 
 ## Tests

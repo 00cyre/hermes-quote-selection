@@ -1,13 +1,15 @@
 const assert = require('node:assert/strict')
 const { start } = require('./harness.cjs')
 
+// A transcript with none of the app's own slot names: the plugin may rely only on
+// the documented chat surface root that tests/mock-app.js puts around each pane.
 const S1 = `
-  <article data-slot="aui_assistant-message-content">
+  <article>
     <p id="a">one <em>two</em><br>three four</p>
     <p id="b">second passage</p>
   </article>
-  <article data-slot="aui_user-message-root"><button type="button"><span id="user">my words</span></button></article>`
-const S2 = `<article data-slot="aui_assistant-message-content"><p id="other">other chat text</p></article>`
+  <article><button type="button"><span id="user">my words</span></button></article>`
+const S2 = `<article><p id="other">other chat text</p></article>`
 const ONE = [{ session: 's1', html: S1 }]
 const TWO = [...ONE, { session: 's2', html: S2 }]
 
@@ -270,21 +272,84 @@ scenario('Remove all clears the pill', ONE, async t => {
   assert.deepEqual(await sends(t), ['send:s1:x'])
 })
 
-scenario('the popup only appears for message text and closes on Escape', TWO, async t => {
+scenario('the popup only appears for chat text outside the reply box and the pill, and closes on Escape', TWO, async t => {
   await t.select('outside')
   await t.page.waitForTimeout(150)
-  assert.equal(await t.addButton.isVisible(), false, 'no popup for text outside a message')
+  assert.equal(await t.addButton.isVisible(), false, 'no popup for text outside a chat')
 
   await type(t, 's1', 'draft text')
   await t.input('s1').evaluate(el => getSelection().selectAllChildren(el))
   await t.page.waitForTimeout(150)
   assert.equal(await t.addButton.isVisible(), false, 'no popup for the reply box')
 
+  // A drag that starts in a message and runs on into the reply box.
+  await t.page.evaluate(() => {
+    const range = document.createRange()
+
+    range.setStart(document.getElementById('b').firstChild, 0)
+    range.setEnd(document.querySelector('[data-pane="s1"] .input').firstChild, 5)
+    getSelection().removeAllRanges()
+    getSelection().addRange(range)
+  })
+  await t.page.waitForTimeout(150)
+  assert.equal(await t.addButton.isVisible(), false, 'no popup for a selection that runs into the reply box')
+
+  // A selection across two chats, with no reply box in between: it starts in
+  // text the first chat shows below its reply box.
+  await t.page.evaluate(() => {
+    const tail = document.createElement('p')
+
+    tail.id = 'tail'
+    tail.textContent = 'text below the reply box'
+    document.querySelector('[data-pane="s1"]').append(tail)
+
+    const range = document.createRange()
+
+    range.setStart(tail.firstChild, 0)
+    range.setEnd(document.getElementById('other').firstChild, 5)
+    getSelection().removeAllRanges()
+    getSelection().addRange(range)
+  })
+  await t.page.waitForTimeout(150)
+  assert.equal(await t.addButton.isVisible(), false, 'no popup for a selection across two chats')
+
   await t.select('user')
   await t.addButton.waitFor()
   await t.page.keyboard.press('Escape')
   assert.equal(await t.addButton.isVisible(), false)
 
+  // The pill's own list is not chat text.
+  await annotate(t, 'b', 'note')
+  await t.pill('s1').click()
+
+  const list = t.pane('s1').getByRole('list', { name: 'Annotations' })
+
+  await list.waitFor()
+  await list.evaluate(el => getSelection().selectAllChildren(el))
+  await t.page.waitForTimeout(150)
+  assert.equal(await t.addButton.isVisible(), false, 'no popup for the text of the pill itself')
+})
+
+scenario('one selection can span two messages of the same chat', ONE, async t => {
+  await t.page.evaluate(() => {
+    const range = document.createRange()
+
+    range.setStart(document.getElementById('b').firstChild, 0)
+    range.setEndAfter(document.getElementById('user').firstChild)
+    getSelection().removeAllRanges()
+    getSelection().addRange(range)
+  })
+  await t.addButton.waitFor()
+  await t.addButton.click()
+  await t.pill('s1').waitFor()
+  await type(t, 's1', 'both')
+  await t.page.keyboard.press('Enter')
+  await until(async () => (await t.log()).length === 1, 'the message is sent')
+
+  const [sent] = await sends(t)
+
+  assert.match(sent, /^send:s1:> second passage\n/)
+  assert.match(sent, /> my words\n\nboth$/)
 })
 
 scenario('an annotation stays with the chat its text came from, even if another chat took focus', TWO, async t => {
@@ -308,7 +373,7 @@ scenario('an annotation stays with the chat its text came from, even if another 
 scenario('a message removed before Add is clicked adds nothing', ONE, async t => {
   await t.select('b')
   await t.addButton.waitFor()
-  await t.page.evaluate(() => document.querySelector('[data-slot="aui_assistant-message-content"]').remove())
+  await t.page.evaluate(() => document.getElementById('b').closest('article').remove())
   await t.addButton.click()
   await t.page.waitForTimeout(150)
   assert.equal(await pills(t).count(), 0)

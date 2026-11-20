@@ -111,6 +111,9 @@
     const el = document.createElement('main')
 
     el.dataset.pane = session
+    // The app marks each chat (primary or tile) with this documented attribute.
+    // The root holds the transcript and the reply box, as it does in the app.
+    el.setAttribute('data-chat-surface', '')
     el.innerHTML =
       `<section class="thread">${html}</section>` +
       '<form class="composer"><div class="fade"><div class="top"></div>' +

@@ -1,6 +1,6 @@
 name: quote-selection
 label: Quote in reply
-version: 0.2.1
+version: 0.2.2
 manifest_version: 2
 api_version: 1
 description: "Select text in a Hermes Desktop chat to keep it as an annotation in a pill above the reply box, with an optional comment. Collect several; they are sent with your next message as Markdown quotes. Desktop-only: no agent tools, hooks or env vars."

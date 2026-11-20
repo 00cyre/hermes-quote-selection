@@ -9,7 +9,7 @@ Select text in a Hermes Desktop chat and keep it as an annotation above the repl
 ## What it does
 
 1. Select text in a chat: any message, yours or the agent's.
-2. A popup appears next to the selection. Type a comment if you want one, then click **Add annotation** or press Enter.
+2. A popup appears next to the selection with the cursor already in its comment box. Type a comment if you want one, then press Enter or click **Add annotation**.
 3. A pill above the reply box counts your annotations. Repeat for other passages.
 4. Send as usual. Each passage goes out as a Markdown quote with its comment under it, followed by what you typed:
 
@@ -23,6 +23,8 @@ switch this to local time
 Can you fix both before the next export?
 ```
 
+- Escape closes the popup and leaves the text selected. A click elsewhere or a right-click closes it too.
+- Copying while the cursor is in the empty comment box still copies the selected text.
 - Click the pill to see the list, edit a comment or remove an annotation. The × removes them all.
 - With nothing typed, Enter sends the annotations on their own.
 - Nothing is typed into the reply box, and nothing is sent until you send.
@@ -49,13 +51,16 @@ Then switch it on under **Capabilities → Plugins**. The desktop half of a plug
 ## What it touches
 
 - Reads the text you select (`window.getSelection()`) and where it is on screen.
-- Checks that the selection is inside one chat, using `data-chat-surface`, the attribute the Desktop plugin SDK guide documents for a chat's root. It reads the attribute only. It does not restyle, hide or rewrite anything in the app.
+- Checks that the selection is inside one chat, using `data-chat-surface`, the attribute the Desktop plugin SDK guide documents for a chat's root. It reads the attribute only. It does not hide or rewrite anything in the app.
 - Ignores a selection that touches a text field (`contenteditable`, `textarea`, `input`, `role="textbox"`) or the plugin's own pill.
 - Adds a popup element to the page while a selection is active, and a pill in the reply box's `composer.top` slot.
+- Moves the cursor into the popup's comment box when you finish a selection with the mouse, unless you are typing in a text field. Without that, the app sends the next key you type to the reply box.
+- A text field that takes the cursor also takes the page's selection. So while the cursor is in the comment box, the plugin keeps the passage marked with the CSS Custom Highlight API, in the app's selection colour (`--ui-selection-background`). It puts the selection back when the popup closes without adding.
 - Adds the annotations to your message through the SDK's composer middleware when you send.
 - Listens for Enter and clicks in a reply box that holds a pill. Only a send that follows one of those takes the annotations, so a queued or scripted send never picks them up.
 - In two cases the app sends without running middleware: the box is empty, or the agent is working. There the plugin sends through `host.composer.submit` and clears what you typed with `host.composer.setDraft`. While the agent is working it handles that Enter itself, so the app's own handler does not also send the message. If a completion list (`role="listbox"`) is open, Enter is left to the app.
-- Annotations are kept in memory only. No network calls, no files, no clipboard, no stored settings, no telemetry.
+- Answers a copy made with the cursor in the empty comment box with the selected passage, as plain text. It never reads the clipboard.
+- Annotations are kept in memory only. No network calls, no files, no stored settings, no telemetry.
 
 ## Known limits
 
@@ -65,6 +70,8 @@ Then switch it on under **Capabilities → Plugins**. The desktop half of a plug
 - While the agent is working, Enter delivers your message and annotations straight away, and files attached to the box stay there for your next message. Cmd/Ctrl+Enter (queue) and the Send button leave the annotations in the pill.
 - Messages sent by voice don't take annotations.
 - A selection has to start and end inside one chat. It can span several messages.
+- Only a selection finished with the mouse moves the cursor. One made from the keyboard, or by the app itself, shows the popup and leaves the cursor where it is.
+- With the cursor in the comment box, Shift+arrow keys no longer change the selection. Press Escape first to get it back.
 - Quotes are plain text. Formatting such as bold or code fences inside a selection is not carried over.
 
 ## Tests

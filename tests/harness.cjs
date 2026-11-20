@@ -12,7 +12,7 @@ const PLUGIN = process.env.QUOTE_PLUGIN || path.join(ROOT, 'desktop', 'plugin.js
 const PAGE = `<style>
   :root { --ui-bg-elevated:#1c2128; --ui-bg-quinary:#21262d; --ui-stroke-secondary:#3d444d; --ui-stroke-tertiary:#30363d;
           --ui-text-primary:#e6edf3; --ui-text-secondary:#c9d1d9; --ui-text-tertiary:#8b949e; --ui-accent:#a78bfa;
-          --chrome-action-hover:#30363d }
+          --chrome-action-hover:#30363d; --ui-selection-background:#264f78 }
   body { margin:0; background:#0d1117; color:#e6edf3; font:15px/1.55 -apple-system, system-ui, sans-serif }
   #app { display:flex; gap:16px; padding:90px 24px 16px; align-items:flex-start }
   main { flex:1; min-width:0; max-width:720px }
@@ -28,7 +28,7 @@ const PAGE = `<style>
   .codicon { font-style:normal; line-height:1 }
   .codicon-comment::before { content:'❞' } .codicon-close::before { content:'×' } .codicon-edit::before { content:'✎' }
   .codicon-trash::before { content:'⌫' } .codicon-chevron-down::before { content:'▾' } .codicon-chevron-up::before { content:'▴' }
-  ::selection { background:#264f78 }
+  ::selection { background:var(--ui-selection-background) }
 </style><div id="app"></div><aside id="outside">sidebar text</aside>`
 
 const DEPS = `

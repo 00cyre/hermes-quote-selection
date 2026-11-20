@@ -9,6 +9,7 @@
 //   busy Cmd/Ctrl+Enter with text              -> queued, middleware skipped
 //   host.composer.submit(id, text)             -> idle: middleware chain -> sent
 //                                                 busy: steered
+//   a printable key outside any text field     -> typed into the focused chat's reply box
 ;(() => {
   const { React, jsx, createRoot, atom, useStore } = window.__DEPS__
 
@@ -174,6 +175,42 @@
       focus(session)
     }
   }
+
+  // Type-to-focus, as in the app's keybinds: a window capture listener that takes
+  // an unmodified printable key pressed outside a text field, focuses the reply
+  // box of the chat in focus and types the key there.
+  window.addEventListener(
+    'keydown',
+    event => {
+      const el = event.target
+      const editable =
+        el?.isContentEditable ||
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        el instanceof HTMLSelectElement
+      const pane = panes.get(focused.get())
+
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.key.length !== 1 ||
+        editable ||
+        !pane
+      ) {
+        return
+      }
+
+      event.preventDefault()
+      pane.input.focus()
+      pane.input.textContent += event.key
+      getSelection().selectAllChildren(pane.input)
+      getSelection().collapseToEnd()
+    },
+    true
+  )
 
   const host = {
     state: { focusedStoredSessionId: focused, busy },

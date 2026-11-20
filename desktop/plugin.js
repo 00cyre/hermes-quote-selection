@@ -548,6 +548,43 @@ function createPopup() {
   return { box, button, note, preview }
 }
 
+/**
+ * Keeps a passage visibly marked while the cursor is in the comment box. A text
+ * field that takes the cursor also takes the page's selection, so without this
+ * the passage would look deselected. Painted with the CSS Custom Highlight API
+ * in the app's selection colour: nothing in the chat is changed.
+ */
+function createMarker() {
+  if (!globalThis.CSS?.highlights || typeof Highlight !== 'function' || typeof CSSStyleSheet !== 'function') {
+    return null
+  }
+
+  let sheet = null
+
+  const hide = () => CSS.highlights.delete(ID)
+
+  return {
+    hide,
+    show(range) {
+      if (!sheet) {
+        sheet = new CSSStyleSheet()
+        sheet.replaceSync(`::highlight(${ID}){background-color:var(--ui-selection-background,Highlight)}`)
+        document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+      }
+
+      CSS.highlights.set(ID, new Highlight(range))
+    },
+    dispose() {
+      hide()
+
+      if (sheet) {
+        document.adoptedStyleSheets = document.adoptedStyleSheets.filter(other => other !== sheet)
+        sheet = null
+      }
+    }
+  }
+}
+
 export default {
   id: ID,
   name: 'Quote in reply',
@@ -556,30 +593,35 @@ export default {
   register(ctx) {
     const later = (fn, ms) => ctx.setTimeout(fn, ms)
     const { box, button, note, preview } = createPopup()
-    let picked = null
+    const marker = createMarker()
+    let picked = null // the passage the popup is open for
+    let closedFor = null // a passage the popup was closed for: it stays closed while that selection is on the page
     let frame = 0
     let dragging = false
+    let grab = false // a selection was just finished by hand: the comment box takes the cursor
+    let menu = false // a context menu opened: whatever it selected is left alone
 
     const close = () => {
       cancelAnimationFrame(frame)
       frame = 0
+      grab = false
+      menu = false
       picked = null
+      marker?.hide()
       box.remove()
       preview.textContent = ''
       note.value = ''
     }
 
-    function refresh() {
-      frame = 0
+    // With the cursor in the comment box, the page's selection is no longer the passage.
+    const holding = () => Boolean(picked) && box.contains(document.activeElement)
 
-      if (dragging || box.contains(document.activeElement)) {
-        return
-      }
-
+    /** The passage the page's selection covers, when that is text of one chat. */
+    function read() {
       const selection = window.getSelection()
 
       if (!selection || selection.isCollapsed || selection.rangeCount !== 1) {
-        return close()
+        return null
       }
 
       const range = selection.getRangeAt(0)
@@ -595,30 +637,79 @@ export default {
         !surface.contains(end) ||
         [...surface.querySelectorAll(`${FIELDS}, ${MINE}`)].some(el => range.intersectsNode(el))
       ) {
-        return close()
+        return null
       }
 
       const chat = currentChat()
       const text = selection.toString().replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').trim()
 
       if (!chat || !text) {
-        return close()
+        return null
       }
 
-      const rect = range.getBoundingClientRect()
+      return {
+        chat,
+        end,
+        start,
+        text,
+        range: range.cloneRange(),
+        // Where the user started and stopped, to give the selection back the same way round.
+        from: [selection.anchorNode, selection.anchorOffset],
+        to: [selection.focusNode, selection.focusOffset]
+      }
+    }
+
+    /** Whether the page's selection is still exactly this passage. */
+    function still(pick) {
+      const selection = window.getSelection()
+
+      return Boolean(
+        pick &&
+        selection &&
+        !selection.isCollapsed &&
+        selection.anchorNode === pick.from[0] &&
+        selection.anchorOffset === pick.from[1] &&
+        selection.focusNode === pick.to[0] &&
+        selection.focusOffset === pick.to[1]
+      )
+    }
+
+    /** Hand the selection the comment box took back to the page. */
+    function giveBack(pick) {
+      try {
+        if (pick.from[0].isConnected && pick.to[0].isConnected) {
+          window.getSelection()?.setBaseAndExtent(...pick.from, ...pick.to)
+        }
+      } catch {
+        // The text changed under it. There is nothing to give back.
+      }
+    }
+
+    /** Close the popup without adding. The selection goes back to the page, and the popup stays closed for it. */
+    function dismiss() {
+      const pick = picked
+      const ours = holding()
+
+      close()
+
+      if (pick) {
+        if (ours) {
+          giveBack(pick)
+        }
+
+        closedFor = pick
+      }
+    }
+
+    /** Put the popup next to the passage. False when the passage is not on screen. */
+    function place() {
+      const rect = picked.range.getBoundingClientRect()
       const top = Math.max(0, rect.top)
       const bottom = Math.min(window.innerHeight, rect.bottom)
 
       if (bottom <= top || !rect.width) {
-        return close()
+        return false
       }
-
-      if (!picked || picked.text !== text || picked.start !== start) {
-        note.value = ''
-      }
-
-      picked = { chat, end, start, text }
-      preview.textContent = text.replace(/\s+/g, ' ')
 
       if (!box.isConnected) {
         document.body.append(box)
@@ -631,6 +722,67 @@ export default {
 
       box.style.left = `${left}px`
       box.style.top = `${Math.max(8, Math.min(window.innerHeight - height - 8, above))}px`
+
+      return true
+    }
+
+    function refresh() {
+      frame = 0
+
+      if (dragging) {
+        return
+      }
+
+      // The menu works on the selection (Copy, Look Up), and a right-click may
+      // have selected the word under it. Taking the cursor would empty it.
+      if (menu) {
+        close()
+        closedFor = read()
+
+        return
+      }
+
+      const take = grab
+
+      grab = false
+
+      if (holding()) {
+        place() // follow the passage; out of view, the popup waits where it is
+
+        return
+      }
+
+      const found = read()
+
+      if (!found) {
+        closedFor = null
+
+        return close()
+      }
+
+      if (still(closedFor)) {
+        return close()
+      }
+
+      closedFor = null
+
+      if (!picked || picked.text !== found.text || picked.start !== found.start) {
+        note.value = ''
+      }
+
+      picked = found
+      preview.textContent = found.text.replace(/\s+/g, ' ')
+
+      if (!place()) {
+        return close()
+      }
+
+      // Without this the next key would go to the reply box: the app sends keys
+      // typed outside a text field there. A text field the user is already in
+      // keeps the cursor.
+      if (take && !elementOf(document.activeElement)?.closest(FIELDS)) {
+        note.focus({ preventScroll: true })
+      }
     }
 
     const schedule = () => {
@@ -648,6 +800,7 @@ export default {
       const comment = note.value
 
       close()
+      closedFor = null
 
       // The text is gone: its chat was closed or replaced since the selection was made.
       if (!start.isConnected || !end.isConnected) {
@@ -668,10 +821,27 @@ export default {
       document,
       'pointerdown',
       event => {
-        if (!box.contains(event.target)) {
-          close()
-          dragging = true
+        if (box.contains(event.target)) {
+          return
         }
+
+        const pick = picked
+        const ours = holding()
+
+        close()
+
+        if (pick) {
+          // The page gets its selection back before the click acts on it, so a
+          // Shift+click extends it and a right-click finds it. A click that
+          // leaves it as it is (a button, a scrollbar) does not open the popup again.
+          if (ours) {
+            giveBack(pick)
+          }
+
+          closedFor = pick
+        }
+
+        dragging = event.button === 0
       },
       true
     )
@@ -679,6 +849,7 @@ export default {
       window,
       'pointerup',
       () => {
+        grab = dragging
         dragging = false
         schedule()
       },
@@ -693,12 +864,34 @@ export default {
       },
       true
     )
-    ctx.addEventListener(document, 'selectionchange', schedule)
+    ctx.addEventListener(document, 'selectionchange', () => {
+      // Selecting again by hand, even the same passage, opens the popup again.
+      if (dragging && closedFor && !still(closedFor)) {
+        closedFor = null
+      }
+
+      schedule()
+    })
+    ctx.addEventListener(
+      document,
+      'contextmenu',
+      event => {
+        if (box.contains(event.target)) {
+          return
+        }
+
+        dismiss()
+        dragging = false
+        menu = true
+        schedule()
+      },
+      true
+    )
     ctx.addEventListener(
       document,
       'scroll',
       () => {
-        if (picked && !box.contains(document.activeElement)) {
+        if (picked) {
           schedule()
         }
       },
@@ -707,7 +900,7 @@ export default {
     ctx.addEventListener(window, 'resize', schedule)
     ctx.addEventListener(window, 'blur', () => {
       dragging = false
-      close()
+      dismiss()
     })
     ctx.addEventListener(
       document,
@@ -716,7 +909,7 @@ export default {
         if (event.key === 'Escape' && picked && !event.isComposing) {
           event.preventDefault()
           event.stopPropagation()
-          close()
+          dismiss()
         } else if (event.target === note && event.key === 'Enter' && !event.isComposing) {
           event.preventDefault()
           event.stopPropagation()
@@ -739,7 +932,27 @@ export default {
       },
       true
     )
-    ctx.addEventListener(button, 'mousedown', event => event.preventDefault())
+    // The passage is marked for as long as the cursor is in the popup, however it got there.
+    ctx.addEventListener(box, 'focusin', () => {
+      if (picked) {
+        marker?.show(picked.range)
+      }
+    })
+    // The cursor left the popup some other way (Tab, or the app moved it).
+    ctx.addEventListener(box, 'focusout', schedule)
+    // A click on the popup must not take the cursor out of the comment box.
+    ctx.addEventListener(box, 'mousedown', event => {
+      if (event.target !== note) {
+        event.preventDefault()
+      }
+    })
+    // Copy, with nothing selected in the comment box, still means the passage.
+    ctx.addEventListener(note, 'copy', event => {
+      if (picked && note.selectionStart === note.selectionEnd && event.clipboardData) {
+        event.clipboardData.setData('text/plain', picked.text)
+        event.preventDefault()
+      }
+    })
     ctx.addEventListener(button, 'click', add)
 
     ctx.register({ id: 'annotations', area: COMPOSER_AREAS.top, order: -100, render: () => jsx(Annotations, {}) })
@@ -747,6 +960,8 @@ export default {
 
     ctx.onDispose(() => {
       close()
+      marker?.dispose()
+      closedFor = null
       roots.clear()
       armed = -Infinity
       $annotations.set({})

@@ -65,6 +65,209 @@ scenario('a mouse selection becomes a pill, and nothing is typed or sent', ONE, 
   assert.deepEqual(await t.log(), [])
 })
 
+// --- the comment box takes the cursor ---------------------------------------
+
+const hasCursor = locator => locator.evaluate(el => el === document.activeElement).catch(() => false)
+const selected = t => t.page.evaluate(() => getSelection().toString())
+// The text the plugin keeps marked while the page's own selection is elsewhere.
+const marked = t =>
+  t.page.evaluate(() => {
+    const ranges = [...CSS.highlights.values()].flatMap(highlight => [...highlight])
+
+    return ranges.length ? ranges.map(String).join('|') : null
+  })
+
+const ends = t => t.page.evaluate(() => [getSelection().anchorOffset, getSelection().focusOffset])
+
+async function dragInto(t, id) {
+  await t.drag(id)
+  await until(() => hasCursor(t.comment), 'the comment box has the cursor')
+}
+
+// Select a one-line element right to left, starting in the empty part of its line.
+async function dragBackInto(t, id) {
+  const box = await t.page.locator('#' + id).boundingBox()
+
+  await t.page.mouse.move(box.x + box.width - 1, box.y + box.height / 2)
+  await t.page.mouse.down()
+  await t.page.mouse.move(box.x + 1, box.y + box.height / 2, { steps: 6 })
+  await t.page.mouse.up()
+  await until(() => hasCursor(t.comment), 'the comment box has the cursor')
+}
+
+scenario('a finished mouse selection puts the cursor in the comment box, so typing goes there', ONE, async t => {
+  await dragInto(t, 'b')
+  await t.page.keyboard.type('why?')
+  assert.equal(await t.comment.inputValue(), 'why?')
+  assert.equal((await t.input('s1').innerText()).trim(), '', 'nothing was typed into the reply box')
+  assert.equal(await marked(t), 'second passage', 'the passage stays marked while the comment is typed')
+
+  await t.page.keyboard.press('Enter')
+  await t.pill('s1').waitFor()
+  assert.equal(await marked(t), null)
+  await until(() => hasCursor(t.input('s1')), 'the cursor moves on to the reply box')
+  await t.page.keyboard.type('fix it')
+  await t.page.keyboard.press('Enter')
+  await until(async () => (await t.log()).length === 1, 'the message is sent')
+  assert.deepEqual(await sends(t), ['send:s1:> second passage\n\nwhy?\n\nfix it'])
+})
+
+scenario('a double-click and a triple-click put the cursor there too', ONE, async t => {
+  const box = await t.page.locator('#b').boundingBox()
+  const at = [box.x + 12, box.y + box.height / 2]
+
+  await t.page.mouse.dblclick(...at)
+  await until(() => hasCursor(t.comment), 'the comment box has the cursor after a double-click')
+  assert.match(await marked(t), /^second\s?$/)
+
+  await t.page.mouse.click(...at, { clickCount: 3 })
+  await until(async () => ((await marked(t)) ?? '').trim() === 'second passage', 'the triple-click picked the whole passage')
+  await until(() => hasCursor(t.comment), 'the comment box has the cursor after a triple-click')
+})
+
+scenario('copying still copies the passage while the cursor is in the comment box', ONE, async t => {
+  await t.page.evaluate(() => {
+    window.copies = []
+    // Runs after the plugin: what a copy would put on the clipboard, and whether the plugin supplied it.
+    document.addEventListener('copy', event =>
+      window.copies.push({ text: event.clipboardData.getData('text/plain'), supplied: event.defaultPrevented })
+    )
+  })
+
+  const copies = () => t.page.evaluate(() => window.copies)
+
+  await dragInto(t, 'b')
+  await t.page.keyboard.press('ControlOrMeta+c')
+  await until(async () => (await copies()).length === 1, 'the copy happened')
+  assert.deepEqual((await copies())[0], { text: 'second passage', supplied: true })
+
+  // Words selected in the comment box itself are copied the usual way.
+  await t.page.keyboard.type('my note')
+  await t.comment.evaluate(el => el.select())
+  await t.page.keyboard.press('ControlOrMeta+c')
+  await until(async () => (await copies()).length === 2, 'the second copy happened')
+  assert.deepEqual((await copies())[1], { text: '', supplied: false })
+})
+
+scenario('Escape gives the selection back, and the popup stays closed for it', ONE, async t => {
+  await dragBackInto(t, 'b')
+  assert.equal(await selected(t), '', 'the cursor is in the comment box, so the page has no selection')
+
+  await t.page.keyboard.press('Escape')
+  await until(async () => (await selected(t)) === 'second passage', 'the selection is back on the page')
+  assert.deepEqual(await ends(t), [14, 0], 'the same way round as it was made')
+  assert.equal(await marked(t), null)
+  await quiet(t)
+  assert.equal(await t.addButton.isVisible(), false, 'the popup stays closed')
+
+  // A click on a control elsewhere leaves the selection, and the popup, alone.
+  await t.pane('s1').locator('.attach').click()
+  await quiet(t)
+  assert.equal(await selected(t), 'second passage')
+  assert.equal(await t.addButton.isVisible(), false, 'a click elsewhere does not bring it back')
+
+  // Selecting the very same passage again by hand does.
+  await dragBackInto(t, 'b')
+  assert.equal(await marked(t), 'second passage')
+})
+
+scenario('a click on a control elsewhere closes the popup, and it does not come back for that selection', ONE, async t => {
+  await dragInto(t, 'b')
+  await t.pane('s1').locator('.attach').click()
+  await quiet(t)
+  assert.equal(await t.addButton.isVisible(), false)
+  assert.equal(await selected(t), 'second passage', 'the selection went back to the page')
+  assert.equal(await hasCursor(t.comment), false)
+})
+
+scenario('a right-click closes the popup and leaves the selection for the menu', ONE, async t => {
+  await dragInto(t, 'b')
+
+  const box = await t.page.locator('#b').boundingBox()
+
+  await t.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: 'right' })
+  await until(async () => (await selected(t)) === 'second passage', 'the selection is back for the menu')
+  await quiet(t)
+  assert.equal(await t.addButton.isVisible(), false)
+  assert.equal(await selected(t), 'second passage', 'nothing took the selection away again')
+
+  // A right-click on other text (macOS selects the word under it) opens a menu
+  // for that text. The popup stays out of its way too.
+  const a = await t.page.locator('#a').boundingBox()
+
+  await t.page.mouse.click(a.x + 20, a.y + a.height - 8, { button: 'right' })
+  await quiet(t)
+
+  const after = await selected(t)
+
+  assert.equal(await t.addButton.isVisible(), false, 'no popup while a menu is open for the selection')
+  assert.equal(await selected(t), after)
+})
+
+scenario('Shift+click extends the selection the comment box had taken', ONE, async t => {
+  await dragBackInto(t, 'b')
+  assert.equal(await marked(t), 'second passage')
+
+  // The end of the first line of the paragraph above, clear of the popup.
+  const a = await t.page.locator('#a').boundingBox()
+
+  await t.page.keyboard.down('Shift')
+  await t.page.mouse.click(a.x + a.width - 40, a.y + 6)
+  await t.page.keyboard.up('Shift')
+  await until(
+    async () => /^three four\s+second passage$/.test(((await marked(t)) ?? '').trim()),
+    'the selection grew from the passage to the click'
+  )
+  await until(() => hasCursor(t.comment), 'the comment box has the cursor again')
+})
+
+scenario('a selection nobody made by hand shows the popup without taking the cursor', ONE, async t => {
+  await t.select('b')
+  await t.addButton.waitFor()
+  await quiet(t)
+  assert.equal(await hasCursor(t.comment), false)
+  assert.equal(await selected(t), 'second passage', 'the selection is left on the page')
+  assert.equal(await marked(t), null)
+})
+
+scenario('a text field the user is typing in keeps the cursor', ONE, async t => {
+  await type(t, 's1', 'half a sen')
+  // A pointer gesture that selects chat text while the reply box keeps the cursor.
+  await t.page.evaluate(() => {
+    const passage = document.getElementById('b')
+
+    passage.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    getSelection().selectAllChildren(passage)
+    passage.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
+  })
+  await t.addButton.waitFor()
+  await quiet(t)
+  assert.equal(await hasCursor(t.input('s1')), true)
+  assert.equal(await hasCursor(t.comment), false)
+})
+
+scenario('a click on the popup itself keeps it open with the cursor in the comment box', ONE, async t => {
+  await dragInto(t, 'b')
+  await t.page.keyboard.type('half')
+  await t.page.getByRole('group', { name: 'Annotate selection' }).click({ position: { x: 40, y: 12 } })
+  await quiet(t)
+  assert.equal(await t.addButton.isVisible(), true)
+  assert.equal(await hasCursor(t.comment), true)
+  assert.equal(await t.comment.inputValue(), 'half')
+})
+
+scenario('the popup follows the passage when the page scrolls under the cursor', ONE, async t => {
+  await t.page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<div style="height:2000px"></div>'))
+  await dragInto(t, 'b')
+
+  const popup = t.page.getByRole('group', { name: 'Annotate selection' })
+  const before = (await popup.boundingBox()).y
+
+  await t.page.evaluate(() => window.scrollBy(0, 30))
+  await until(async () => Math.abs((await popup.boundingBox()).y - (before - 30)) < 1.5, 'the popup moved with the passage')
+  assert.equal(await hasCursor(t.comment), true)
+})
+
 scenario('Enter in the comment box adds the annotation', ONE, async t => {
   await t.select('b')
   await t.addButton.waitFor()

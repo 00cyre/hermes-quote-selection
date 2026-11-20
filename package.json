@@ -1,0 +1,12 @@
+{
+  "name": "hermes-quote-selection",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "test": "node tests/check.cjs",
+    "demo": "node tests/demo.cjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0"
+  }
+}
